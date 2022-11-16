@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi_sqlalchemy import db as sqldb
 
-from . import config, logins, models
+from . import config, logins, models, verification
 
 router = APIRouter(prefix="/purchases")
 
@@ -28,8 +28,23 @@ def get_storefront_info(app_id: str):
         if app.recommended_donation > 0:
             token_type = 1
 
+    verification_status = verification.get_verification_status(app_id)
+    verification_method = (
+        None
+        if verification_status.method == verification.VerificationMethod.NONE
+        else verification_status.method
+    )
+
     return {
         "token_type": token_type,
+        "add_custom_values": {
+            "flathub::verified": "true" if verification_status.verified else None,
+            "flathub::verification_method": verification_method,
+            "flathub::verification_website": verification_status.website,
+            "flathub::verification_login_provider": verification_status.login_provider,
+            "flathub::verification_login_name": verification_status.login_name,
+        },
+        "reserve_custom_value_prefixes": ["flathub::"],
     }
 
 
