@@ -613,6 +613,26 @@ class DirectUploadAppDeveloper(Base):
 FlathubUser.TABLES_FOR_DELETE.append(DirectUploadAppDeveloper)
 
 
+class UploadToken(Base):
+    __tablename__ = "uploadtoken"
+
+    id = Column(Integer, primary_key=True)
+    comment = Column(String, nullable=False)
+
+    app_id = Column(String, nullable=False)
+    scopes = Column(String, nullable=False)
+    repos = Column(String, nullable=False)
+
+    issued_at = Column(DateTime, nullable=False)
+    issued_to = Column(Integer, ForeignKey(FlathubUser.id), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(Boolean, nullable=False, default=False)
+
+    @staticmethod
+    def by_id(db, token_id: int) -> Optional["UploadToken"]:
+        return db.session.query(UploadToken).filter_by(id=token_id).first()
+
+
 # Wallet related content
 
 

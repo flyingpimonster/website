@@ -1,11 +1,9 @@
-import base64
 import contextlib
+import datetime
 import typing as T
-from datetime import datetime, timedelta
 
 import dramatiq
 import dramatiq.brokers.redis
-import jwt
 import requests
 import sentry_dramatiq
 import sentry_sdk
@@ -123,21 +121,6 @@ def update():
     search.create_or_update_apps(search_added_at)
 
 
-def _create_flat_manager_token(use: str, scopes: list[str], **kwargs):
-    return "Bearer " + jwt.encode(
-        {
-            "sub": "build",
-            "scope": scopes,
-            "iat": datetime.utcnow(),
-            "exp": datetime.utcnow() + timedelta(minutes=5),
-            "name": f"Backend token for internal use ({use})",
-            **kwargs,
-        },
-        base64.b64decode(settings.flat_manager_build_secret),
-        algorithm="HS256",
-    )
-
-
 @dramatiq.actor
 def republish_app(appid: str):
     from .vending import VendingError
@@ -147,7 +130,7 @@ def republish_app(appid: str):
 
     repos = ["stable"]
 
-    token = _create_flat_manager_token(
+    token = utils.create_flat_manager_token(
         "republish_app", ["republish"], apps=[appid], repos=repos
     )
 
@@ -173,7 +156,7 @@ def review_check(
     status: T.Literal["Passed"] | T.Literal["Failed"],
     reason: str | None,
 ):
-    token = _create_flat_manager_token("review_check", ["reviewcheck"])
+    token = utils.create_flat_manager_token("review_check", ["reviewcheck"])
     requests.post(
         f"{settings.flat_manager_api}/api/v1/job/{job_id}/check/review",
         json={"new-status": {"status": status, "reason": reason}},

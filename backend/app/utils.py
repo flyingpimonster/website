@@ -1,10 +1,13 @@
+import base64
 import gzip
 import hashlib
 import json
 import os
 import re
+from datetime import datetime, timedelta
 from typing import Any
 
+import jwt
 import requests
 from lxml import etree
 from pydantic import BaseModel
@@ -366,3 +369,18 @@ def is_valid_app_id(appid: str) -> bool:
     if len(elements) < 3:
         return False
     return all(re.match("^[A-Za-z_][\\w\\-]*$", element) for element in elements)
+
+
+def create_flat_manager_token(use: str, scopes: list[str], **kwargs):
+    return "Bearer " + jwt.encode(
+        {
+            "sub": "build",
+            "scope": scopes,
+            "iat": datetime.utcnow(),
+            "exp": datetime.utcnow() + timedelta(minutes=5),
+            "name": f"Backend token for internal use ({use})",
+            **kwargs,
+        },
+        base64.b64decode(config.settings.flat_manager_build_secret),
+        algorithm="HS256",
+    )
