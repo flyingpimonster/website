@@ -13,6 +13,7 @@ import { VendingConfig } from "../../../src/types/Vending"
 import { IS_PRODUCTION } from "src/env"
 import Tabs from "src/components/Tabs"
 import { AppDevModeration } from "src/components/moderation/AppDevModeration"
+import UploadTokenControls from "src/components/application/AppUploadControls/UploadTokenControls"
 
 export default function AppManagementPage({
   app,
@@ -54,6 +55,10 @@ export default function AppManagementPage({
       {
         name: t("moderation-pending-reviews"),
         content: <AppDevModeration app={app} />,
+      },
+      {
+        name: t("upload-tokens"),
+        content: <UploadTokenControls app={app} />,
       },
     )
   }
