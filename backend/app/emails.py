@@ -33,8 +33,9 @@ class EmailCategory(str, Enum):
     MODERATION_HELD = "moderation_held"
     MODERATION_REJECTED = "moderation_rejected"
     SECURITY_LOGIN = "security_login"
-    UPLOAD_TOKEN_CREATED = "upload_token_created"
     UPLOAD_TOKEN_AUTO_REVOKED = "upload_token_auto_revoked"
+    UPLOAD_TOKEN_CREATED = "upload_token_created"
+    UPLOAD_TOKEN_REMINDER = "upload_token_reminder"
 
 
 class EmailInfo(BaseModel):
@@ -78,6 +79,7 @@ def _create_html(info: EmailInfo, app_name: str, email: str, user_display_name: 
         "email_subject": info.subject,
         "app_id": info.app_id,
         "app_name": app_name,
+        "frontend_url": settings.frontend_url,
         **info.template_data,
     }
 

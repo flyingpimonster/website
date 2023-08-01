@@ -1,4 +1,6 @@
 import sentry_sdk
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
@@ -64,6 +66,15 @@ purchases.register_to_app(app)
 upload_tokens.register_to_app(app)
 
 compat.register_to_app(app)
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    worker.send_token_reminders.send,
+    CronTrigger.from_crontab("0 */12 * * *"),
+    id="send_token_reminders",
+    replace_existing=True,
+)
+scheduler.start()
 
 
 @app.on_event("startup")

@@ -628,6 +628,8 @@ class UploadToken(Base):
     expires_at = Column(DateTime, nullable=False)
     revoked = Column(Boolean, nullable=False, default=False)
 
+    last_expiration_reminder = Column(DateTime, nullable=True, default=None)
+
     @staticmethod
     def by_id(db, token_id: int) -> Optional["UploadToken"]:
         return db.session.query(UploadToken).filter_by(id=token_id).first()

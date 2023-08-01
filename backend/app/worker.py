@@ -7,20 +7,14 @@ import dramatiq.brokers.redis
 import requests
 import sentry_dramatiq
 import sentry_sdk
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, extract, or_
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import apps, config, db, exceptions, search, stats, summary, utils
+from . import apps, config, db, exceptions, models, search, stats, summary, utils
 from .config import settings
-from .emails import (
-    EmailInfo,
-)
-from .emails import (
-    send_email as send_email_impl,
-)
-from .emails import (
-    send_one_email as send_one_email_impl,
-)
+from .emails import EmailCategory, EmailInfo
+from .emails import send_email as send_email_impl
+from .emails import send_one_email as send_one_email_impl
 
 if config.settings.sentry_dsn:
     sentry_sdk.init(
@@ -173,3 +167,51 @@ def send_email(email):
 @dramatiq.actor
 def send_one_email(message: str, dest: str):
     send_one_email_impl(message, dest)
+
+
+@dramatiq.actor
+def send_token_reminders():
+    DAYS = [1, 3, 7, 14, 30]
+    now = datetime.datetime.utcnow()
+    with WorkerDB() as db:
+        tokens: list[models.UploadToken] = (
+            db.session.query(models.UploadToken, models.FlathubUser.display_name)
+            .filter(
+                # Don't send reminders about revoked tokens
+                models.UploadToken.revoked.is_(False),
+                # Haven't sent a reminder in the last day
+                or_(
+                    models.UploadToken.last_expiration_reminder.is_(None),
+                    models.UploadToken.last_expiration_reminder
+                    < now - datetime.timedelta(days=1),
+                ),
+                # Days until expiration is in the list
+                extract("day", models.UploadToken.expires_at - now).in_(DAYS),
+                # Not expired yet
+                models.UploadToken.expires_at > now,
+            )
+            .join(models.FlathubUser)
+        )
+
+        for token, issued_to in tokens:
+            send_email.send(
+                EmailInfo(
+                    app_id=token.app_id,
+                    category=EmailCategory.UPLOAD_TOKEN_REMINDER,
+                    subject="Upload token is about to expire",
+                    template_data={
+                        "token_id": f"backend_{token.id}",
+                        "comment": token.comment,
+                        "expires_at": token.expires_at.strftime("%-d %B %Y"),
+                        "issued_to": issued_to,
+                        "scopes": token.scopes.split(" "),
+                        "repos": token.repos.split(" "),
+                        "days_until_expiration": (
+                            token.expires_at - datetime.datetime.utcnow()
+                        ).days,
+                    },
+                ).dict()
+            )
+            token.last_expiration_reminder = datetime.datetime.utcnow()
+
+        db.session.commit()

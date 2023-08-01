@@ -137,6 +137,18 @@
       "token_id": "backend_1234"
     }
   },
+  "upload_token_reminder": {
+    "category": "upload_token_reminder",
+    "data": {
+      "comment": "Upload token for org.flatpak.Hello",
+      "issued_to": "Test User",
+      "scopes": ["build", "upload", "publish"],
+      "repos": ["stable", "beta"],
+      "expires_at":"31 July 2023",
+      "token_id": "backend_1234",
+      "days_until_expiration": 30
+    }
+  },
   "upload_token_auto_revoked": {
     "category": "upload_token_auto_revoked",
     "data": {

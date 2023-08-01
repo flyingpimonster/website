@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<p>
+  An upload token for {% include "app_name_and_id.html" %} expires in {{ days_until_expiration }} days.
+</p>
+
+<h3>Details of affected token</h3>
+
+<ul>
+  <li>
+    <strong>Token comment:</strong>
+    {{ comment }}
+  </li>
+
+  <li>
+    <strong>Issued to:</strong>
+    {{ issued_to }}
+  </li>
+
+  <li>
+    <strong>Scopes:</strong>
+    {{ scopes | join(", ") }}
+  </li>
+
+  <li>
+    <strong>Repos:</strong>
+    {{ repos | join(", ") }}
+  </li>
+
+  <li>
+    <strong>Expires:</strong>
+    {{ expires_at }}
+  </li>
+
+  <li>
+    <strong>Token ID:</strong>
+    {{ token_id }}
+  </li>
+</ul>
+
+<p>
+  You can obtain a new token on the Upload Tokens tab of the app's developer settings:
+  <a href="{{ frontend_url }}/apps/manage/{{ app_id }}">{{ frontend_url }}/apps/manage/{{ app_id }}</a>.
+</p>
+
+{% endblock content %}
