@@ -200,6 +200,9 @@ def create_upload_token(
         algorithm="HS256",
     )
 
+    if config.settings.flat_manager_build_token_prefix is not None:
+        encoded = config.settings.flat_manager_build_token_prefix + encoded
+
     return NewTokenResponse(
         token=encoded,
         details=_token_response(token, issued_to.display_name),
