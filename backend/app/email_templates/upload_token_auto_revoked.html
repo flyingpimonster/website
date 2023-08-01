@@ -1,0 +1,35 @@
+{% extends "base.html" %} {% block content %}
+
+<p>
+  An upload token for {% include "app_name_and_id.html" %} was found in a public
+  repository. Flathub has been notified about the leak and the token has been
+  revoked.
+</p>
+
+<p>The token was found at <a href="{{ url }}">{{ url }}</a>.</p>
+
+<h3>Details of affected token</h3>
+
+<ul>
+  <li>
+    <strong>Token comment:</strong>
+    {{ comment }}
+  </li>
+
+  <li>
+    <strong>Scopes:</strong>
+    {{ scopes | join(", ") }}
+  </li>
+
+  <li>
+    <strong>Repos:</strong>
+    {{ repos | join(", ") }}
+  </li>
+
+  <li>
+    <strong>Token ID:</strong>
+    {{ token_id }}
+  </li>
+</ul>
+
+{% endblock content %}

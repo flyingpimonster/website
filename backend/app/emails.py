@@ -34,6 +34,7 @@ class EmailCategory(str, Enum):
     MODERATION_REJECTED = "moderation_rejected"
     SECURITY_LOGIN = "security_login"
     UPLOAD_TOKEN_CREATED = "upload_token_created"
+    UPLOAD_TOKEN_AUTO_REVOKED = "upload_token_auto_revoked"
 
 
 class EmailInfo(BaseModel):

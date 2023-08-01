@@ -1,12 +1,21 @@
 import base64
 import datetime
+import hashlib
+import logging
 from enum import Enum
+from typing import Annotated
 
 import jwt
 import requests
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.ec import ECDSA
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
 from fastapi_sqlalchemy import db as sqldb
 from pydantic import BaseModel
+from requests.auth import HTTPBasicAuth
 
 from . import config, models, utils, worker
 from .emails import EmailCategory, EmailInfo
@@ -63,15 +72,18 @@ def _token_response(token: models.UploadToken, issued_to: str | None) -> TokenRe
         app_id=token.app_id,
         scopes=token.scopes.split(" "),
         repos=token.repos.split(" "),
-        issued_at=token.issued_at.timestamp(),
+        issued_at=int(token.issued_at.timestamp()),
         issued_to=issued_to,
-        expires_at=token.expires_at.timestamp(),
+        expires_at=int(token.expires_at.timestamp()),
         revoked=token.revoked,
     )
 
 
+_JTI_PREFIX = "backend_"
+
+
 def _jti(token: models.UploadToken) -> str:
-    return f"backend_{token.id}"
+    return f"{_JTI_PREFIX}{token.id}"
 
 
 @router.get("/{app_id}", status_code=200)
@@ -209,6 +221,24 @@ def create_upload_token(
     )
 
 
+def _revoke_token(jti: str):
+    """Sends the request to flat-manager to revoke the token"""
+    flat_manager_jwt = utils.create_flat_manager_token(
+        "revoke_upload_token", ["tokenmanagement"], sub=""
+    )
+
+    response = requests.post(
+        config.settings.flat_manager_api + "/api/v1/tokens/revoke",
+        headers={"Authorization": flat_manager_jwt},
+        json={"token_ids": [jti]},
+    )
+    if not response.ok:
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorDetail.FLAT_MANAGER_ERROR,
+        )
+
+
 @router.post("/{token_id}/revoke", status_code=204)
 def revoke_upload_token(token_id: int, login=Depends(login_state)):
     if config.settings.flat_manager_api is None:
@@ -227,24 +257,139 @@ def revoke_upload_token(token_id: int, login=Depends(login_state)):
             detail=ErrorDetail.NOT_APP_DEVELOPER,
         )
 
-    flat_manager_jwt = utils.create_flat_manager_token(
-        "revoke_upload_token", ["tokenmanagement"], sub=""
-    )
-
-    # Tell flat-manager to revoke the token
-    response = requests.post(
-        config.settings.flat_manager_api + "/api/v1/tokens/revoke",
-        headers={"Authorization": flat_manager_jwt},
-        json={"token_ids": [_jti(token)]},
-    )
-    if not response.ok:
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorDetail.FLAT_MANAGER_ERROR,
-        )
+    _revoke_token(_jti(token))
 
     token.revoked = True
     sqldb.session.commit()
+
+
+secret_scanning_router = APIRouter(prefix="/secret-scanning")
+
+
+class SecretScanningToken(BaseModel):
+    token: str
+    type: str
+    url: str
+    source: str
+
+
+class SecretScanningTokenLabel(str, Enum):
+    FALSE_POSITIVE = "false_positive"
+    TRUE_POSITIVE = "true_positive"
+
+
+class SecretScanningTokenResponse(BaseModel):
+    token_hash: str
+    token_type: str
+    label: SecretScanningTokenLabel
+
+
+async def get_body(request: Request):
+    return await request.body()
+
+
+@secret_scanning_router.post("/notify")
+def secret_scanning(
+    tokens: list[SecretScanningToken],
+    github_public_key_identifier: Annotated[str | None, Header()],
+    github_public_key_signature: Annotated[str | None, Header()],
+    body: bytes = Depends(get_body),
+):
+    # Get the public keys from GitHub
+    response = requests.get(
+        "https://api.github.com/meta/public_keys/secret_scanning",
+        auth=HTTPBasicAuth(
+            config.settings.github_client_id, config.settings.github_client_secret
+        ),
+    )
+
+    if not response.ok:
+        raise HTTPException(status_code=500, detail="Could not fetch public keys")
+
+    # Verify the signature
+    json = response.json()
+
+    keys = [
+        key["key"]
+        for key in json["public_keys"]
+        if key["key_identifier"] == github_public_key_identifier
+    ]
+    if len(keys) != 1:
+        raise HTTPException(status_code=400, detail="Invalid key identifier")
+
+    public_key = load_pem_public_key(keys[0].encode("utf-8"), default_backend())
+    signature = base64.b64decode(github_public_key_signature)
+
+    try:
+        public_key.verify(signature, body, ECDSA(hashes.SHA256()))
+    except InvalidSignature:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    responses = []
+    for token in tokens:
+        response = SecretScanningTokenResponse(
+            token_hash=hashlib.sha256(token.token.encode("utf-8")).hexdigest(),
+            token_type=token.type,
+            label=SecretScanningTokenLabel.TRUE_POSITIVE,
+        )
+
+        token_text = token.token
+        if prefix := config.settings.flat_manager_build_token_prefix:
+            token_text = token_text.removeprefix(prefix)
+
+        # Decode the JWT
+        try:
+            decoded = jwt.decode(
+                token_text,
+                base64.b64decode(config.settings.flat_manager_build_secret),
+                algorithms=["HS256"],
+            )
+        except jwt.exceptions.InvalidTokenError:
+            response.label = SecretScanningTokenLabel.FALSE_POSITIVE
+            responses.append(response)
+            continue
+
+        # Revoke the token
+        if jti := decoded.get("jti"):
+            token_id = int(jti.removeprefix(_JTI_PREFIX))
+
+            if upload_token := models.UploadToken.by_id(sqldb, token_id):
+                if upload_token.revoked:
+                    responses.append(response)
+                    continue
+
+                upload_token.revoked = True
+                sqldb.session.commit()
+
+                worker.send_email.send(
+                    EmailInfo(
+                        app_id=upload_token.app_id,
+                        category=EmailCategory.UPLOAD_TOKEN_AUTO_REVOKED,
+                        subject="Upload token found in public repository and revoked",
+                        template_data={
+                            "token_id": jti,
+                            "comment": upload_token.comment,
+                            "scopes": upload_token.scopes.split(" "),
+                            "repos": upload_token.repos.split(" "),
+                            "source": token.source,
+                            "url": token.url,
+                        },
+                    ).dict()
+                )
+            else:
+                logging.error(
+                    f"Secret scanning notified us of a leaked token ({jti}) which is valid, but we have no record of it in the database! We will still tell flat-manager to revoke it."
+                )
+
+            _revoke_token(jti)
+        else:
+            logging.error(
+                "WARNING! Secret scanning notified us of a leaked token which is valid, but has no jti claim! We cannot tell flat-manager to revoke it because there is no identifier."
+            )
+
+        responses.append(response)
+
+    return responses
 
 
 def register_to_app(app: FastAPI):
@@ -252,3 +397,4 @@ def register_to_app(app: FastAPI):
     Register the login and authentication flows with the FastAPI application
     """
     app.include_router(router)
+    app.include_router(secret_scanning_router)
